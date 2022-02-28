@@ -1,58 +1,77 @@
 using AuthorizationAPI;
 using AuthorizationAPI.Authorization;
 using AuthorizationAPI.DataAccess;
-using AuthorizationAPI.DataAccess.Repository;
 using AuthorizationAPI.Helpers;
 using AuthorizationAPI.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-string connection = builder.Configuration.GetConnectionString("DefaultConnection");
-
-
-builder.Services.AddDbContext<DataContext>(options => options.UseNpgsql(connection));
-builder.Services.AddCors();
-
-builder.Services.AddControllers().AddJsonOptions(x =>
 {
-    x.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
+    var services = builder.Services;
+    var env = builder.Environment;
 
-builder.Services.AddScoped<IJwtUtils, JwtUtils>();
-builder.Services.AddScoped<IUserService, UserService>();
+    string connection = builder.Configuration.GetConnectionString("DefaultConnection");
+    builder.Services.AddDbContext<DataContext>(options => options.UseNpgsql(connection));
 
-builder.Services.Configure<AuthSettings>(builder.Configuration.GetSection("AppSettings"));
+    services.AddCors();
+    services.AddControllers().AddJsonOptions(x =>
+    {
+        x.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+    var mapper = MappingConfig.RegisterMaps().CreateMapper();
+    builder.Services.AddSingleton(mapper);
+    builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 
-var mapper = MappingConfig.RegisterMaps().CreateMapper();
-builder.Services.AddSingleton(mapper);
-builder.Services.AddScoped<IUserRepository, UserRepository>();
-builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
+    services.AddEndpointsApiExplorer();
+    services.AddSwaggerGen(c =>
+    {
+        c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+        {
+            Version = "v1",
+            Title = "Auth API",
+            Description = "ASP.NET Core Web API"
+        });
+    });
+
+    services.Configure<AuthSettings>(builder.Configuration.GetSection("AppSettings"));
+
+    services.AddScoped<IJwtUtils, JwtUtils>();
+    services.AddScoped<IAccountService, AccountService>();
+    services.AddScoped<IEmailService, EmailService>();
+    services.AddScoped<IAccountRepository, AccountRepository>();
+}
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    var dataContext = scope.ServiceProvider.GetRequiredService<DataContext>();
+    dataContext.Database.Migrate();
 }
 
-app.UseCors(x => x
-                .AllowAnyOrigin()
-                .AllowAnyMethod()
-                .AllowAnyHeader());
+{
+    
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Auth API V1");
+    });
 
-// global error handler
-app.UseMiddleware<ErrorHandlerMiddleware>();
+    app.UseCors(x => x
+        .SetIsOriginAllowed(origin => true)
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials());
 
-// custom jwt auth middleware
-app.UseMiddleware<JwtMiddleware>();
+    app.UseMiddleware<ErrorHandlerMiddleware>();
 
-app.Run();
+    app.UseMiddleware<JwtMiddleware>();
+
+    app.MapControllers();
+}
+
+app.Run("http://localhost:4000");

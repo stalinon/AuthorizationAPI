@@ -1,31 +1,37 @@
-﻿using AuthorizationAPI.Helpers;
-using AuthorizationAPI.Models.Dto;
+﻿using AuthorizationAPI.DataAccess;
+using AuthorizationAPI.Entities;
+using AuthorizationAPI.Helpers;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace AuthorizationAPI.Authorization
 {
     public class JwtUtils : IJwtUtils
     {
-        private readonly AuthSettings _AuthSettings;
+        private readonly DataContext _context;
+        private readonly AuthSettings _appSettings;
 
-        public JwtUtils(IOptions<AuthSettings> AuthSettings)
+        public JwtUtils(
+            DataContext context,
+            IOptions<AuthSettings> appSettings)
         {
-            _AuthSettings = AuthSettings.Value;
+            _context = context;
+            _appSettings = appSettings.Value;
         }
 
-        public string GenerateJwtToken(UserDto user)
+        public string GenerateJwtToken(Account account)
         {
-            // generate token that is valid for 7 days
+            // generate token that is valid for 15 minutes
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_AuthSettings.Secret);
+            var key = Encoding.ASCII.GetBytes(_appSettings.Secret);
             var tokenDescriptor = new SecurityTokenDescriptor
             {
-                Subject = new ClaimsIdentity(new[] { new Claim("id", user.Id.ToString()) }),
-                Expires = DateTime.UtcNow.AddDays(7),
+                Subject = new ClaimsIdentity(new[] { new Claim("id", account.Id.ToString()) }),
+                Expires = DateTime.UtcNow.AddMinutes(15),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
             };
             var token = tokenHandler.CreateToken(tokenDescriptor);
@@ -38,7 +44,7 @@ namespace AuthorizationAPI.Authorization
                 return null;
 
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_AuthSettings.Secret);
+            var key = Encoding.ASCII.GetBytes(_appSettings.Secret);
             try
             {
                 tokenHandler.ValidateToken(token, new TokenValidationParameters
@@ -52,16 +58,37 @@ namespace AuthorizationAPI.Authorization
                 }, out SecurityToken validatedToken);
 
                 var jwtToken = (JwtSecurityToken)validatedToken;
-                var userId = int.Parse(jwtToken.Claims.First(x => x.Type == "id").Value);
+                var accountId = int.Parse(jwtToken.Claims.First(x => x.Type == "id").Value);
 
-                // return user id from JWT token if validation successful
-                return userId;
+                // return account id from JWT token if validation successful
+                return accountId;
             }
             catch
             {
                 // return null if validation fails
                 return null;
             }
+        }
+
+        public RefreshToken GenerateRefreshToken(string ipAddress)
+        {
+            var refreshToken = new RefreshToken
+            {
+                // token is a cryptographically strong random sequence of values
+                Token = Convert.ToHexString(RandomNumberGenerator.GetBytes(64)),
+                // token is valid for 7 days
+                Expires = DateTime.UtcNow.AddDays(7),
+                Created = DateTime.UtcNow,
+                CreatedByIp = ipAddress
+            };
+
+            // ensure token is unique by checking against db
+            var tokenIsUnique = !_context.Accounts.Any(a => a.RefreshTokens.Any(t => t.Token == refreshToken.Token));
+
+            if (!tokenIsUnique)
+                return GenerateRefreshToken(ipAddress);
+
+            return refreshToken;
         }
     }
 }

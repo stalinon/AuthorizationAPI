@@ -1,5 +1,5 @@
-﻿using AuthorizationAPI.Helpers;
-using AuthorizationAPI.Services;
+﻿using AuthorizationAPI.DataAccess;
+using AuthorizationAPI.Helpers;
 using Microsoft.Extensions.Options;
 
 namespace AuthorizationAPI.Authorization
@@ -7,22 +7,22 @@ namespace AuthorizationAPI.Authorization
     public class JwtMiddleware
     {
         private readonly RequestDelegate _next;
-        private readonly AuthSettings _AuthSettings;
+        private readonly AuthSettings _appSettings;
 
-        public JwtMiddleware(RequestDelegate next, IOptions<AuthSettings> AuthSettings)
+        public JwtMiddleware(RequestDelegate next, IOptions<AuthSettings> appSettings)
         {
             _next = next;
-            _AuthSettings = AuthSettings.Value;
+            _appSettings = appSettings.Value;
         }
 
-        public async Task Invoke(HttpContext context, IUserService userService, IJwtUtils jwtUtils)
+        public async Task Invoke(HttpContext context, DataContext dataContext, IJwtUtils jwtUtils)
         {
             var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
-            var userId = jwtUtils.ValidateJwtToken(token);
-            if (userId != null)
+            var accountId = jwtUtils.ValidateJwtToken(token);
+            if (accountId != null)
             {
-                // jwt удачно - крепим пользователя к контексту
-                context.Items["User"] = userService.Get(userId.Value);
+                // attach account to context on successful jwt validation
+                context.Items["Account"] = await dataContext.Accounts.FindAsync(accountId.Value);
             }
 
             await _next(context);

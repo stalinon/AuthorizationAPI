@@ -21,14 +21,12 @@ namespace AuthorizationAPI.Authorization
 
         public void OnAuthorization(AuthorizationFilterContext context)
         {
-            // если есть атрибут [AllowAnonymous], то пропускаем
             var allowAnonymous = context.ActionDescriptor.EndpointMetadata.OfType<AllowAnonymousAttribute>().Any();
             if (allowAnonymous)
                 return;
 
-            // авторизуемся
-            var user = context.HttpContext.Items["User"] as User;
-            if (user == null || (_roles.Any() && !_roles.Contains(user.Role)))
+            var account = context.HttpContext.Items["Account"] as Account;
+            if (account == null || (_roles.Any() && !_roles.Contains(account.Role)))
             {
                 context.Result = new JsonResult(new { message = "Unauthorized" }) { StatusCode = StatusCodes.Status401Unauthorized };
             }
